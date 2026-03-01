@@ -60,10 +60,9 @@ original_art2_code = """class ART2A_E:
 
 # Load Iris Data for simulation
 iris = load_iris()
-
-X_iris = iris.data # Take first 15 samples for visualization
+X_iris = iris.data
 np.random.shuffle(X_iris)
-X_iris=X_iris[:15]
+X_iris = X_iris[:15]
 
 # -----------------------------------------------------------------------------
 # APP STATE MANAGER
@@ -82,6 +81,9 @@ class ContinuousAppState:
         self.active = 0
 
         self.phase = "INIT"
+        self.phase_executed = False
+        self.transition_to = None
+
         self.current_sample = np.zeros(self.n_inputs)
         self.I_sorted = []
         self.candidate_idx = 0
@@ -91,62 +93,117 @@ class ContinuousAppState:
 
 art2_state = ContinuousAppState()
 
-def highlight_art2_code(phase, is_new):
+
+def generate_code_display(phase, is_new):
+    """Maps the current execution phase to specific lines of code for highlighting."""
+    # Line indices in original_art2_code (0-based after split('\n')):
+    #  0: class ART2A_E:
+    #  3: def __init__(...)
+    # 15: self.learning_rate = learning_rate
+    # 17: def _find_best(self, X):
+    # 19: self.F2[...] = 1 - np.sqrt(...)
+    # 20: I = np.argsort(...)
+    # 22: for i in I:
+    # 24: if self.F2[i] >= self.rho:
+    # 26: self.W[i] = self.learning_rate*X + ...
+    # 27: return i
+    # 29: def learn(self, X):
+    # 31: # Standardize X to fit in [0,1] range
+    # 34: X_ /= X_.max()
+    # 41: # No match found...
+    # 44: self.W[i] = X_
+    # 46: return self.W[i], i
     lines = original_art2_code.split('\n')
-    highlights = []
+    highlight_indices = []
 
-    if phase == "INIT": highlights = list(range(3, 14))
-    elif phase == "LOAD_INPUT": highlights = [31, 34, 35, 36] # Standardize
-    elif phase == "BOTTOM_UP": highlights = [16, 17, 18] # Distance computation
-    elif phase == "VIGILANCE_CHECK": highlights = [20, 21] # Match check
-    elif phase == "CREATE_NEW": highlights = [44, 45, 46, 47, 48] # New node
+    if phase == "INIT":
+        highlight_indices = list(range(3, 16))       # __init__ body
+    elif phase == "LOAD_INPUT":
+        highlight_indices = [29, 30, 31, 32, 33, 34] # learn() + standardize
+    elif phase == "BOTTOM_UP":
+        highlight_indices = [17, 18, 19, 20]          # _find_best + distance
+    elif phase == "VIGILANCE_CHECK":
+        highlight_indices = [22, 23, 24]              # for loop + vigilance check
     elif phase == "UPDATE_WEIGHTS":
-        if is_new: highlights = [46, 47]
-        else: highlights = [22, 23, 24] # Geometric update
+        if is_new:
+            highlight_indices = [44, 45, 46]          # W[i] = X_, active += 1
+        else:
+            highlight_indices = [25, 26, 27]          # learn data (geometric update)
+    elif phase == "CREATE_NEW":
+        highlight_indices = [41, 42, 43]              # no match found, allocate slot
 
-    return [html.Div(line, style={
-        'paddingLeft': '10px', 'whiteSpace': 'pre', 'fontFamily': 'monospace', 'fontSize': '12px',
-        'backgroundColor': '#ffeeba' if i in highlights else 'transparent',
-        'fontWeight': 'bold' if i in highlights else 'normal',
-        'borderLeft': '4px solid #ffc107' if i in highlights else '4px solid transparent'
-    }) for i, line in enumerate(lines)]
+    components = []
+    for i, line in enumerate(lines):
+        style = {
+            'paddingLeft': '10px', 'margin': '0', 'whiteSpace': 'pre',
+            'fontFamily': 'monospace', 'fontSize': '13px'
+        }
+        if i in highlight_indices:
+            style['backgroundColor'] = '#ffeeba'
+            style['fontWeight'] = 'bold'
+            style['borderLeft'] = '4px solid #ffc107'
+        else:
+            style['borderLeft'] = '4px solid transparent'
+            style['color'] = '#555'
+        components.append(html.Div(line, style=style))
+
+    return components
+
 
 # -----------------------------------------------------------------------------
 # LAYOUT (importable)
 # -----------------------------------------------------------------------------
 layout = html.Div(
-    style={'display': 'flex', 'padding': '20px', 'gap': '20px', 'height': '85vh'},
+    style={'display': 'flex', 'flexDirection': 'row', 'fontFamily': 'Arial, sans-serif',
+           'padding': '20px', 'gap': '30px', 'height': '85vh', 'boxSizing': 'border-box'},
     children=[
-        # Code Panel
-        html.Div(style={'flex': '0 0 450px', 'display': 'flex', 'flexDirection': 'column'}, children=[
-            html.H3("Original ART2A_E Code"),
+        # LEFT PANEL: Original Code
+        html.Div(style={'flex': '0 0 420px', 'display': 'flex', 'flexDirection': 'column'}, children=[
+            html.H3("Original ART2A_E Implementation Code",
+                    style={'marginTop': '0', 'borderBottom': '1px solid #ccc', 'paddingBottom': '10px'}),
             html.Div(id='art2-code-panel', style={
-                'backgroundColor': '#f8f9fa', 'border': '1px solid #ddd', 'flex': '1', 'overflowY': 'auto'
+                'backgroundColor': '#f8f9fa', 'padding': '15px 0', 'border': '1px solid #ddd',
+                'overflowY': 'auto', 'flex': '1', 'lineHeight': '1.6'
             })
         ]),
 
-        # Visualization Panel
+        # RIGHT PANEL: Interactive Dashboard
         html.Div(style={'flex': '1', 'display': 'flex', 'flexDirection': 'column'}, children=[
-            html.H2("Continuous ART2A_E Sequential Dashboard"),
+            html.H1("Continuous ART2A_E Sequential Dashboard",
+                    style={'marginTop': '0', 'borderBottom': '1px solid #ccc', 'paddingBottom': '10px'}),
 
-            html.Div(style={'display': 'flex', 'gap': '20px', 'marginBottom': '15px'}, children=[
-                html.Div([html.B("Vigilance (Rho):"),
-                          dcc.Slider(id='art2-rho-s', min=0.5, max=1.0, step=0.01, value=0.9,
-                                     marks={0.5: '0.5', 1: '1.0'})], style={'flex': 1}),
-                html.Div([html.B("Learning Rate (Eta):"),
-                          dcc.Slider(id='art2-eta-s', min=0.05, max=0.5, step=0.05, value=0.2,
-                                     marks={0.1: '0.1', 0.5: '0.5'})], style={'flex': 1}),
-                html.Button("Next Step", id='art2-next-b', n_clicks=0,
-                            style={'padding': '10px 20px', 'backgroundColor': '#007BFF',
-                                   'color': 'white', 'border': 'none', 'cursor': 'pointer'}),
+            # Controls
+            html.Div(style={'display': 'flex', 'gap': '20px', 'marginBottom': '20px',
+                            'alignItems': 'center', 'paddingTop': '10px'}, children=[
+                html.Div([
+                    html.Label("Vigilance (Rho): ", style={'fontWeight': 'bold'}),
+                    dcc.Slider(id='art2-rho-s', min=0.5, max=1.0, step=0.01, value=0.9,
+                               marks={0.5: '0.5', 0.7: '0.7', 0.9: '0.9', 1.0: '1.0'})
+                ], style={'flex': 1}),
+                html.Div([
+                    html.Label("Learning Rate (Eta): ", style={'fontWeight': 'bold'}),
+                    dcc.Slider(id='art2-eta-s', min=0.05, max=0.5, step=0.05, value=0.2,
+                               marks={0.1: '0.1', 0.3: '0.3', 0.5: '0.5'})
+                ], style={'flex': 1}),
+                html.Button("▶ Execute Step", id='art2-next-b', n_clicks=0,
+                            style={'padding': '10px 20px', 'fontSize': '16px',
+                                   'backgroundColor': '#007BFF', 'color': 'white',
+                                   'border': 'none', 'cursor': 'pointer', 'borderRadius': '4px',
+                                   'minWidth': '180px'}),
                 html.Button("Reset", id='art2-reset-b', n_clicks=0,
-                            style={'padding': '10px 20px', 'backgroundColor': '#DC3545',
-                                   'color': 'white', 'border': 'none', 'cursor': 'pointer'}),
+                            style={'padding': '10px 20px', 'fontSize': '16px',
+                                   'backgroundColor': '#DC3545', 'color': 'white',
+                                   'border': 'none', 'cursor': 'pointer', 'borderRadius': '4px'}),
             ]),
 
+            # Visualizations and Logs
             html.Div(style={'display': 'flex', 'gap': '20px', 'flex': '1'}, children=[
-                dcc.Textarea(id='art2-log-t', readOnly=True,
-                             style={'width': '250px', 'height': '100%', 'fontSize': '11px'}),
+                dcc.Textarea(
+                    id='art2-log-t', readOnly=True,
+                    style={'width': '260px', 'height': '100%', 'fontFamily': 'monospace',
+                           'fontSize': '12px', 'padding': '10px', 'boxSizing': 'border-box',
+                           'resize': 'none', 'border': '1px solid #ccc'}
+                ),
                 dcc.Graph(id='art2-graph-v', style={'flex': '1', 'height': '100%'})
             ])
         ])
@@ -160,7 +217,8 @@ def register_callbacks(app):
     @app.callback(
         [Output('art2-graph-v', 'figure'),
          Output('art2-log-t', 'value'),
-         Output('art2-code-panel', 'children')],
+         Output('art2-code-panel', 'children'),
+         Output('art2-next-b', 'children')],
         [Input('art2-next-b', 'n_clicks'),
          Input('art2-reset-b', 'n_clicks')],
         [State('art2-rho-s', 'value'),
@@ -168,64 +226,213 @@ def register_callbacks(app):
     )
     def step_continuous_art(n, r, rho, eta):
         tid = ctx.triggered_id
-        if tid == 'art2-reset-b': art2_state.reset()
+
+        if tid == 'art2-reset-b':
+            art2_state.reset()
+
         elif tid == 'art2-next-b':
-            if art2_state.phase == "INIT":
-                art2_state.phase = "LOAD_INPUT"
-                art2_state.status_log += "Initialization complete.\n"
-            elif art2_state.phase == "LOAD_INPUT":
-                if art2_state.input_idx < len(X_iris):
-                    raw = X_iris[art2_state.input_idx]
-                    art2_state.current_sample = (raw - raw.min()) / (raw.max() - raw.min()) # Standardize
-                    art2_state.status_log += f"\n--- Sample {art2_state.input_idx} ---\n"
-                    art2_state.phase = "BOTTOM_UP"
-                else: art2_state.status_log += "Finished sequence.\n"
-            elif art2_state.phase == "BOTTOM_UP":
-                art2_state.F2 = 1 - np.sqrt(((art2_state.W - art2_state.current_sample)**2).sum(axis=1)) # Euclidean distance
-                art2_state.I_sorted = np.argsort(art2_state.F2[:art2_state.active].ravel())[::-1]
-                art2_state.candidate_idx = 0
-                art2_state.phase = "VIGILANCE_CHECK" if art2_state.active > 0 else "CREATE_NEW"
-            elif art2_state.phase == "VIGILANCE_CHECK":
-                if art2_state.candidate_idx < len(art2_state.I_sorted):
-                    i = art2_state.I_sorted[art2_state.candidate_idx]
-                    score = art2_state.F2[i]
-                    art2_state.status_log += f"Check Cat {i}: Similarity {score:.3f} (Req: {rho})\n"
-                    if score >= rho:
-                        art2_state.status_log += f"-> Resonance with {i}.\n"
-                        art2_state.winning_cat, art2_state.is_new, art2_state.phase = i, False, "UPDATE_WEIGHTS"
-                    else: art2_state.candidate_idx += 1
-                else: art2_state.phase = "CREATE_NEW"
-            elif art2_state.phase == "CREATE_NEW":
-                if art2_state.active < art2_state.m_categories:
-                    art2_state.winning_cat, art2_state.active, art2_state.is_new, art2_state.phase = art2_state.active, art2_state.active + 1, True, "UPDATE_WEIGHTS"
-                    art2_state.status_log += f"Created Cat {art2_state.winning_cat}.\n"
-                else: art2_state.phase, art2_state.input_idx = "LOAD_INPUT", art2_state.input_idx + 1
-            elif art2_state.phase == "UPDATE_WEIGHTS":
-                i = art2_state.winning_cat
-                if art2_state.is_new: art2_state.W[i] = art2_state.current_sample
-                else: art2_state.W[i] = eta * art2_state.current_sample + (1 - eta) * art2_state.W[i] # Geometric update
-                art2_state.status_log += "Weights updated.\n"
-                art2_state.phase, art2_state.input_idx = "LOAD_INPUT", art2_state.input_idx + 1
+            if not art2_state.phase_executed:
+                # ── EXECUTE: run computation, stay on current phase highlight ──
+                if art2_state.phase == "INIT":
+                    art2_state.status_log += "Initialization complete. Ready for inputs.\n"
+                    art2_state.transition_to = "LOAD_INPUT"
 
-        # Figure generation
-        fig = make_subplots(rows=2, cols=2, subplot_titles=("Normalized Input X", "Similarity (1-Distance)", "Prototypes (W) Matrix", "Category Activation"))
-        fnt = dict(size=10)
+                elif art2_state.phase == "LOAD_INPUT":
+                    if art2_state.input_idx < len(X_iris):
+                        raw = X_iris[art2_state.input_idx]
+                        art2_state.current_sample = (raw - raw.min()) / (raw.max() - raw.min())
+                        art2_state.F2 = np.zeros(art2_state.m_categories)
+                        art2_state.winning_cat = None
+                        art2_state.is_new = False
+                        art2_state.status_log += f"\n--- Sample {art2_state.input_idx} ---\n"
+                        art2_state.transition_to = "BOTTOM_UP"
+                    else:
+                        art2_state.status_log += "Finished all samples.\n"
+                        art2_state.transition_to = None
 
-        fig.add_trace(go.Heatmap(z=art2_state.current_sample.reshape(1,-1), colorscale='Greys', texttemplate="%{z:.2f}", textfont=fnt, showscale=False), 1, 1)
-        fig.add_trace(go.Heatmap(z=art2_state.F2.reshape(1,-1), colorscale='Purples', texttemplate="%{z:.2f}", textfont=fnt, showscale=False), 1, 2)
-        fig.add_trace(go.Heatmap(z=art2_state.W, colorscale='Blues', texttemplate="%{z:.2f}", textfont=fnt, showscale=False, xgap=1, ygap=1), 2, 1)
+                elif art2_state.phase == "BOTTOM_UP":
+                    art2_state.F2 = 1 - np.sqrt(
+                        ((art2_state.W - art2_state.current_sample) ** 2).sum(axis=1)
+                    )
+                    art2_state.I_sorted = np.argsort(
+                        art2_state.F2[:art2_state.active].ravel()
+                    )[::-1]
+                    art2_state.candidate_idx = 0
+                    art2_state.status_log += (
+                        f"Similarities computed. Queue: {art2_state.I_sorted.tolist()}\n"
+                    )
+                    art2_state.transition_to = (
+                        "VIGILANCE_CHECK" if art2_state.active > 0 else "CREATE_NEW"
+                    )
 
-        # Highlight winning row
-        if art2_state.phase == "UPDATE_WEIGHTS" or art2_state.phase == "VIGILANCE_CHECK":
-            target = art2_state.winning_cat if art2_state.winning_cat is not None else (art2_state.I_sorted[art2_state.candidate_idx] if art2_state.candidate_idx < len(art2_state.I_sorted) else None)
-            if target is not None:
-                fig.add_shape(type="rect", x0=-0.5, y0=target-0.5, x1=3.5, y1=target+0.5, line=dict(color="red", width=3), row=2, col=1)
+                elif art2_state.phase == "VIGILANCE_CHECK":
+                    if art2_state.candidate_idx < len(art2_state.I_sorted):
+                        i = art2_state.I_sorted[art2_state.candidate_idx]
+                        score = art2_state.F2[i]
+                        art2_state.status_log += f"Check Cat {i}: Sim {score:.3f} (Req: {rho})\n"
+                        if score >= rho:
+                            art2_state.status_log += f"-> RESONANCE with Cat {i}.\n"
+                            art2_state.winning_cat = i
+                            art2_state.is_new = False
+                            art2_state.transition_to = "UPDATE_WEIGHTS"
+                        else:
+                            art2_state.status_log += f"-> RESET Cat {i}.\n"
+                            art2_state.candidate_idx += 1
+                            if art2_state.candidate_idx >= len(art2_state.I_sorted):
+                                art2_state.status_log += "All categories failed.\n"
+                                art2_state.transition_to = "CREATE_NEW"
+                            else:
+                                art2_state.transition_to = None  # stay: check next candidate
+                    else:
+                        art2_state.transition_to = "CREATE_NEW"
 
-        fig.update_layout(height=500, margin=dict(l=20, r=20, t=40, b=20))
-        fig.update_xaxes(dtick=1)
-        fig.update_yaxes(dtick=1)
+                elif art2_state.phase == "CREATE_NEW":
+                    if art2_state.active < art2_state.m_categories:
+                        art2_state.winning_cat = art2_state.active
+                        art2_state.is_new = True
+                        art2_state.active += 1
+                        art2_state.status_log += f"Created Cat {art2_state.winning_cat}.\n"
+                        art2_state.transition_to = "UPDATE_WEIGHTS"
+                    else:
+                        art2_state.status_log += "Capacity full. Skipping input.\n"
+                        art2_state.input_idx += 1
+                        art2_state.transition_to = "LOAD_INPUT"
 
-        return fig, art2_state.status_log, highlight_art2_code(art2_state.phase, art2_state.is_new)
+                elif art2_state.phase == "UPDATE_WEIGHTS":
+                    i = art2_state.winning_cat
+                    if art2_state.is_new:
+                        art2_state.W[i] = art2_state.current_sample
+                    else:
+                        art2_state.W[i] = eta * art2_state.current_sample + (1 - eta) * art2_state.W[i]
+                    art2_state.status_log += "Weights updated.\n"
+                    art2_state.input_idx += 1
+                    art2_state.transition_to = "LOAD_INPUT"
+
+                art2_state.phase_executed = True
+
+            else:
+                # ── ADVANCE: move highlight to the next phase, no computation ──
+                if art2_state.transition_to is not None:
+                    art2_state.phase = art2_state.transition_to
+                    art2_state.transition_to = None
+                art2_state.phase_executed = False
+
+        # ── Button label ──────────────────────────────────────────────────────
+        btn_label = "→ Next Phase" if art2_state.phase_executed else "▶ Execute Step"
+
+        # ── Determine active category for highlights ──────────────────────────
+        active_cat = None
+        if art2_state.phase in ["VIGILANCE_CHECK", "CREATE_NEW", "UPDATE_WEIGHTS"]:
+            if art2_state.winning_cat is not None:
+                active_cat = art2_state.winning_cat
+            elif (art2_state.phase == "VIGILANCE_CHECK"
+                  and art2_state.candidate_idx < len(art2_state.I_sorted)):
+                active_cat = art2_state.I_sorted[art2_state.candidate_idx]
+
+        # ── Generate Figure ───────────────────────────────────────────────────
+        annotation_font = dict(size=10)
+        n = art2_state.n_inputs
+        m = art2_state.m_categories
+
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=(
+                "Normalized Input X",
+                "Similarity (1 − Distance)",
+                "Prototypes W Matrix",
+                "Category Similarity vs Vigilance"
+            ),
+            vertical_spacing=0.26, horizontal_spacing=0.18
+        )
+
+        # Row 1, Col 1 — Normalized Input X (1 × n)
+        fig.add_trace(go.Heatmap(
+            z=art2_state.current_sample.reshape(1, -1),
+            colorscale='Greys', zmin=0, zmax=1,
+            text=art2_state.current_sample.reshape(1, -1),
+            texttemplate="%{text:.2f}", textfont=annotation_font,
+            showscale=False, xgap=1, ygap=1
+        ), row=1, col=1)
+
+        # Row 1, Col 2 — F2 Similarities (1 × m)
+        fig.add_trace(go.Heatmap(
+            z=art2_state.F2.reshape(1, -1),
+            colorscale='Purples', zmin=0, zmax=1,
+            text=art2_state.F2.reshape(1, -1),
+            texttemplate="%{text:.2f}", textfont=dict(size=8),
+            showscale=False, xgap=1, ygap=1
+        ), row=1, col=2)
+
+        # Row 2, Col 1 — Prototypes W (m × n)
+        fig.add_trace(go.Heatmap(
+            z=art2_state.W,
+            colorscale='Blues', zmin=0, zmax=1,
+            text=art2_state.W,
+            texttemplate="%{text:.2f}", textfont=annotation_font,
+            showscale=False, xgap=1, ygap=1
+        ), row=2, col=1)
+
+        # Row 2, Col 2 — Bar chart: similarity per category with vigilance line
+        bar_colors = ['#d0d0d0'] * m
+        for j in range(art2_state.active):
+            bar_colors[j] = '#7b2d8b'
+        if active_cat is not None:
+            bar_colors[active_cat] = '#e63946'
+
+        fig.add_trace(go.Bar(
+            x=list(range(m)),
+            y=art2_state.F2,
+            marker_color=bar_colors,
+            showlegend=False
+        ), row=2, col=2)
+
+        fig.add_hline(
+            y=rho, line_dash="dash", line_color="orange", line_width=2,
+            annotation_text=f"ρ={rho}", annotation_position="top right",
+            row=2, col=2
+        )
+
+        # ── Red highlight boxes ───────────────────────────────────────────────
+        if active_cat is not None:
+            # Highlight column in F2 heatmap (row 1, col 2)
+            fig.add_shape(
+                type="rect",
+                x0=active_cat - 0.5, y0=-0.5, x1=active_cat + 0.5, y1=0.5,
+                line=dict(color="red", width=3), row=1, col=2
+            )
+            # Highlight row in W matrix (row 2, col 1)
+            fig.add_shape(
+                type="rect",
+                x0=-0.5, y0=active_cat - 0.5, x1=n - 0.5, y1=active_cat + 0.5,
+                line=dict(color="red", width=3), row=2, col=1
+            )
+
+        # ── Axis labels ───────────────────────────────────────────────────────
+        fig.update_xaxes(title_text="Features (n)", row=1, col=1, tickfont=dict(size=9))
+        fig.update_yaxes(showticklabels=False, row=1, col=1)
+
+        fig.update_xaxes(title_text="Categories (m)", row=1, col=2,
+                         tickfont=dict(size=9), dtick=1)
+        fig.update_yaxes(showticklabels=False, row=1, col=2)
+
+        fig.update_xaxes(title_text="Features (n)", row=2, col=1, tickfont=dict(size=9))
+        fig.update_yaxes(title_text="Categories (m)", row=2, col=1,
+                         tickfont=dict(size=9), dtick=1)
+
+        fig.update_xaxes(title_text="Category", row=2, col=2,
+                         tickfont=dict(size=9), dtick=1)
+        fig.update_yaxes(title_text="Similarity", row=2, col=2,
+                         range=[-0.05, 1.1], tickfont=dict(size=9))
+
+        fig.update_annotations(font_size=11)  # smaller subplot titles prevent overlap
+        fig.update_layout(margin=dict(l=30, r=40, t=55, b=30), autosize=True)
+
+        return (
+            fig,
+            art2_state.status_log,
+            generate_code_display(art2_state.phase, art2_state.is_new),
+            btn_label
+        )
 
 
 if __name__ == '__main__':

@@ -88,6 +88,80 @@ class FullSOMState:
 
 som_state = FullSOMState()
 
+
+# -----------------------------------------------------------------------------
+# U-MATRIX HELPERS
+# -----------------------------------------------------------------------------
+def calculate_umatrix(codebook):
+    """Average distance to 4-connected neighbours for each neuron in a 2D grid."""
+    rows, cols, _ = codebook.shape
+    u_matrix = np.zeros((rows, cols))
+    for r in range(rows):
+        for c in range(cols):
+            neighbors = []
+            if r > 0:      neighbors.append(np.linalg.norm(codebook[r, c] - codebook[r-1, c]))
+            if r < rows-1: neighbors.append(np.linalg.norm(codebook[r, c] - codebook[r+1, c]))
+            if c > 0:      neighbors.append(np.linalg.norm(codebook[r, c] - codebook[r, c-1]))
+            if c < cols-1: neighbors.append(np.linalg.norm(codebook[r, c] - codebook[r, c+1]))
+            if neighbors:
+                u_matrix[r, c] = np.mean(neighbors)
+    return u_matrix
+
+
+def build_umatrix_figure():
+    if som_state.topology != "2D":
+        fig_u = go.Figure()
+        fig_u.add_annotation(
+            text="U-Matrix is only available for 2D topology",
+            xref="paper", yref="paper", x=0.5, y=0.5,
+            showarrow=False, font=dict(size=14, color='grey')
+        )
+        fig_u.update_layout(
+            title="U-Matrix", height=300,
+            margin=dict(l=20, r=20, t=40, b=20),
+            xaxis={'visible': False}, yaxis={'visible': False}
+        )
+        return fig_u
+
+    u_matrix = calculate_umatrix(som_state.codebook)
+
+    fig_u = go.Figure()
+    fig_u.add_trace(go.Heatmap(
+        z=u_matrix, colorscale='Viridis',
+        colorbar=dict(title='Mean Dist', thickness=12, len=0.8),
+        showscale=True, name='U-Matrix'
+    ))
+
+    # Overlay BMU positions per Iris class with stable jitter
+    rng = np.random.default_rng(42)
+    s_colors  = ['cyan', 'lime', 'magenta']
+    s_markers = ['circle', 'square', 'triangle-up']
+    for cls in range(3):
+        xs, ys = [], []
+        for i, x in enumerate(X_std):
+            if y_iris[i] == cls:
+                D = ((som_state.codebook - x) ** 2).sum(axis=-1)
+                bmu_r, bmu_c = np.unravel_index(np.argmin(D), D.shape)
+                xs.append(bmu_c + rng.uniform(-0.25, 0.25))
+                ys.append(bmu_r + rng.uniform(-0.25, 0.25))
+        fig_u.add_trace(go.Scatter(
+            x=xs, y=ys, mode='markers',
+            marker=dict(color=s_colors[cls], symbol=s_markers[cls], size=8,
+                        line=dict(color='black', width=1)),
+            name=target_names[cls]
+        ))
+
+    fig_u.update_layout(
+        title="U-Matrix: Iris Topology Map",
+        xaxis_title="Grid Column",
+        yaxis_title="Grid Row",
+        height=320,
+        margin=dict(l=50, r=20, t=45, b=40),
+        legend=dict(orientation="h", y=1.12)
+    )
+    return fig_u
+
+
 def generate_code_display(phase, locked, topology):
     if topology == "1D":
         lines = som_code_1d.split('\n')
@@ -180,9 +254,11 @@ layout = html.Div(
                 ])
             ]),
 
-            html.Div(style={'flex': '1', 'display': 'flex', 'flexDirection': 'column', 'gap': '10px'}, children=[
-                dcc.Graph(id='som-graph', style={'flex': '3'}),
-                dcc.Graph(id='som-error-graph', style={'flex': '1.2'})
+            html.Div(style={'flex': '1', 'display': 'flex', 'flexDirection': 'column',
+                            'gap': '10px', 'overflowY': 'auto'}, children=[
+                dcc.Graph(id='som-graph',        style={'height': '380px', 'flex': 'none'}),
+                dcc.Graph(id='som-error-graph',  style={'height': '180px', 'flex': 'none'}),
+                dcc.Graph(id='som-umatrix-graph', style={'height': '340px', 'flex': 'none'})
             ])
         ])
     ]
@@ -195,7 +271,8 @@ def register_callbacks(app):
     @app.callback(
         [Output('som-graph', 'figure'), Output('som-error-graph', 'figure'),
          Output('som-log', 'value'), Output('som-code-panel', 'children'),
-         Output('som-play-timer', 'disabled'), Output('som-play-timer', 'interval')],
+         Output('som-play-timer', 'disabled'), Output('som-play-timer', 'interval'),
+         Output('som-umatrix-graph', 'figure')],
         [Input('som-next', 'n_clicks'), Input('som-reset', 'n_clicks'),
          Input('som-play', 'n_clicks'), Input('som-play-timer', 'n_intervals'),
          Input('som-n-slider', 'value'), Input('som-topo-select', 'value')],
@@ -306,7 +383,8 @@ def register_callbacks(app):
 
         return (fig, fig_err, som_state.status_log,
                 generate_code_display(som_state.phase, som_state.play_mode, som_state.topology),
-                not som_state.play_mode, speed)
+                not som_state.play_mode, speed,
+                build_umatrix_figure())
 
 
 if __name__ == '__main__':
