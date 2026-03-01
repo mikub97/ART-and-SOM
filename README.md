@@ -72,7 +72,6 @@ ART/
 ├── ART1.py           # ART1 algorithm, layout, and callbacks
 ├── ART2A_E.py        # ART2A-E algorithm, layout, and callbacks
 ├── SOM.py            # SOM algorithm, layout, and callbacks
-└── notes.txt         # Notes on the Wf normalisation formula
 ```
 
 Each of `ART1.py`, `ART2A_E.py`, and `SOM.py` is **independently runnable** as a standalone dashboard, and also **importable** by `dashboard.py` via `layout` and `register_callbacks(app)`.
